@@ -21,6 +21,7 @@ yarn.lock
 # OS
 .DS_Store
 Thumbs.db
+nul
 
 # Build outputs
 dist/
