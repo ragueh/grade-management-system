@@ -1,7 +1,20 @@
 import axios from 'axios'
 
+// Use relative URL in production (same origin), localhost in development
+const getBaseURL = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL
+  }
+  // In production, use relative path (served from same origin)
+  if (import.meta.env.PROD) {
+    return '/api'
+  }
+  // In development, use localhost
+  return 'http://localhost:5000/api'
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: getBaseURL(),
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
