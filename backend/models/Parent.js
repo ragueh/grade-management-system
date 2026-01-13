@@ -1,4 +1,4 @@
-const { query, transaction } = require('../config/database');
+const { query, db } = require('../config/database');
 const User = require('./User');
 
 class Parent {
@@ -16,29 +16,49 @@ class Parent {
       phone_number,
     } = parentData;
 
-    return await transaction(async (client) => {
-      // Create user record
-      const userResult = await client.query(
-        `INSERT INTO users (email, password_hash, first_name, last_name, role, phone_number, is_verified)
-         VALUES ($1, $2, $3, $4, 'parent', $5, TRUE)
-         RETURNING id, email, first_name, last_name, role, phone_number, created_at`,
-        [email, await require('../utils/helpers').hashPassword(password), first_name, last_name, phone_number]
-      );
+    // Hash password before transaction (async operation)
+    const passwordHash = await require('../utils/helpers').hashPassword(password);
 
-      const user = userResult.rows[0];
+    // Use better-sqlite3's transaction properly with a synchronous function
+    const createParentTransaction = db.transaction((data) => {
+      // Create user record
+      const userStmt = db.prepare(
+        `INSERT INTO users (email, password_hash, first_name, last_name, role, phone_number, is_verified)
+         VALUES (?, ?, ?, ?, 'parent', ?, 1)`
+      );
+      const userResult = userStmt.run(data.email, data.passwordHash, data.first_name, data.last_name, data.phone_number);
+      const userId = userResult.lastInsertRowid;
 
       // Create parent record
-      const parentResult = await client.query(
-        `INSERT INTO parents (user_id)
-         VALUES ($1)
-         RETURNING id, created_at`,
-        [user.id]
+      const parentStmt = db.prepare(
+        `INSERT INTO parents (user_id) VALUES (?)`
       );
+      const parentResult = parentStmt.run(userId);
+
+      // Get the created records
+      const userSelectStmt = db.prepare(
+        `SELECT id, email, first_name, last_name, role, phone_number, created_at FROM users WHERE id = ?`
+      );
+      const user = userSelectStmt.get(userId);
+
+      const parentSelectStmt = db.prepare(
+        `SELECT id, created_at FROM parents WHERE user_id = ?`
+      );
+      const parent = parentSelectStmt.get(userId);
 
       return {
         ...user,
-        parent: parentResult.rows[0],
+        parent,
       };
+    });
+
+    // Execute the transaction with the data
+    return createParentTransaction({
+      email,
+      passwordHash,
+      first_name,
+      last_name,
+      phone_number,
     });
   }
 

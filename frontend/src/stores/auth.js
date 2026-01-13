@@ -68,9 +68,16 @@ export const useAuthStore = defineStore('auth', () => {
       return { success: false, message: response.data.message }
     } catch (error) {
       console.error('Register error:', error)
+      const responseData = error.response?.data
+      // Extract specific validation errors if available
+      let errorMessage = responseData?.message || 'Registration failed. Please try again.'
+      if (responseData?.errors && responseData.errors.length > 0) {
+        // Format validation errors into a readable message
+        errorMessage = responseData.errors.map(err => err.msg).join(', ')
+      }
       return {
         success: false,
-        message: error.response?.data?.message || 'Registration failed. Please try again.',
+        message: errorMessage,
       }
     }
   }

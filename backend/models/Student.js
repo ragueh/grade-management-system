@@ -1,4 +1,4 @@
-const { query, transaction } = require('../config/database');
+const { query, db } = require('../config/database');
 const User = require('./User');
 
 class Student {
@@ -19,29 +19,53 @@ class Student {
       parent_id = null,
     } = studentData;
 
-    return await transaction(async (client) => {
-      // Create user record
-      const userResult = await client.query(
-        `INSERT INTO users (email, password_hash, first_name, last_name, role, phone_number, is_verified)
-         VALUES ($1, $2, $3, $4, 'student', $5, TRUE)
-         RETURNING id, email, first_name, last_name, role, phone_number, created_at`,
-        [email, await require('../utils/helpers').hashPassword(password), first_name, last_name, phone_number]
-      );
+    // Hash password before transaction (async operation)
+    const passwordHash = await require('../utils/helpers').hashPassword(password);
 
-      const user = userResult.rows[0];
+    // Use better-sqlite3's transaction properly with a synchronous function
+    const createStudentTransaction = db.transaction((data) => {
+      // Create user record
+      const userStmt = db.prepare(
+        `INSERT INTO users (email, password_hash, first_name, last_name, role, phone_number, is_verified)
+         VALUES (?, ?, ?, ?, 'student', ?, 1)`
+      );
+      const userResult = userStmt.run(data.email, data.passwordHash, data.first_name, data.last_name, data.phone_number);
+      const userId = userResult.lastInsertRowid;
 
       // Create student record
-      const studentResult = await client.query(
+      const studentStmt = db.prepare(
         `INSERT INTO students (user_id, student_id, class_id, parent_id, allow_parent_access)
-         VALUES ($1, $2, $3, $4, FALSE)
-         RETURNING id, student_id, class_id, parent_id, allow_parent_access, created_at`,
-        [user.id, student_id, class_id, parent_id]
+         VALUES (?, ?, ?, ?, 0)`
       );
+      studentStmt.run(userId, data.student_id, data.class_id, data.parent_id);
+
+      // Get the created records
+      const userSelectStmt = db.prepare(
+        `SELECT id, email, first_name, last_name, role, phone_number, created_at FROM users WHERE id = ?`
+      );
+      const user = userSelectStmt.get(userId);
+
+      const studentSelectStmt = db.prepare(
+        `SELECT id, student_id, class_id, parent_id, allow_parent_access, created_at FROM students WHERE user_id = ?`
+      );
+      const student = studentSelectStmt.get(userId);
 
       return {
         ...user,
-        student: studentResult.rows[0],
+        student,
       };
+    });
+
+    // Execute the transaction with the data
+    return createStudentTransaction({
+      email,
+      passwordHash,
+      first_name,
+      last_name,
+      phone_number,
+      student_id,
+      class_id,
+      parent_id,
     });
   }
 

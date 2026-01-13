@@ -1,4 +1,4 @@
-const { query, transaction } = require('../config/database');
+const { query, db } = require('../config/database');
 const User = require('./User');
 
 class Teacher {
@@ -18,29 +18,52 @@ class Teacher {
       department,
     } = teacherData;
 
-    return await transaction(async (client) => {
-      // Create user record
-      const userResult = await client.query(
-        `INSERT INTO users (email, password_hash, first_name, last_name, role, phone_number, is_verified)
-         VALUES ($1, $2, $3, $4, 'teacher', $5, FALSE)
-         RETURNING id, email, first_name, last_name, role, phone_number, created_at`,
-        [email, await require('../utils/helpers').hashPassword(password), first_name, last_name, phone_number]
-      );
+    // Hash password before transaction (async operation)
+    const passwordHash = await require('../utils/helpers').hashPassword(password);
 
-      const user = userResult.rows[0];
+    // Use better-sqlite3's transaction properly with a synchronous function
+    const createTeacherTransaction = db.transaction((data) => {
+      // Create user record
+      const userStmt = db.prepare(
+        `INSERT INTO users (email, password_hash, first_name, last_name, role, phone_number, is_verified)
+         VALUES (?, ?, ?, ?, 'teacher', ?, 0)`
+      );
+      const userResult = userStmt.run(data.email, data.passwordHash, data.first_name, data.last_name, data.phone_number);
+      const userId = userResult.lastInsertRowid;
 
       // Create teacher record
-      const teacherResult = await client.query(
+      const teacherStmt = db.prepare(
         `INSERT INTO teachers (user_id, employee_id, department, is_approved_by_admin)
-         VALUES ($1, $2, $3, FALSE)
-         RETURNING id, employee_id, department, is_approved_by_admin, created_at`,
-        [user.id, employee_id, department]
+         VALUES (?, ?, ?, 0)`
       );
+      teacherStmt.run(userId, data.employee_id, data.department);
+
+      // Get the created records
+      const userSelectStmt = db.prepare(
+        `SELECT id, email, first_name, last_name, role, phone_number, created_at FROM users WHERE id = ?`
+      );
+      const user = userSelectStmt.get(userId);
+
+      const teacherSelectStmt = db.prepare(
+        `SELECT id, employee_id, department, is_approved_by_admin, created_at FROM teachers WHERE user_id = ?`
+      );
+      const teacher = teacherSelectStmt.get(userId);
 
       return {
         ...user,
-        teacher: teacherResult.rows[0],
+        teacher,
       };
+    });
+
+    // Execute the transaction with the data
+    return createTeacherTransaction({
+      email,
+      passwordHash,
+      first_name,
+      last_name,
+      phone_number,
+      employee_id,
+      department,
     });
   }
 
@@ -256,15 +279,15 @@ class Teacher {
    * @returns {Promise<void>}
    */
   static async delete(teacherId) {
-    await transaction(async (client) => {
+    transaction((client) => {
       // Archive all classes
-      await client.query(
-        `UPDATE classes SET is_active = FALSE WHERE teacher_id = $1`,
+      client.query(
+        `UPDATE classes SET is_active = 0 WHERE teacher_id = $1`,
         [teacherId]
       );
 
       // Get user ID
-      const userResult = await client.query(
+      const userResult = client.query(
         `SELECT user_id FROM teachers WHERE id = $1`,
         [teacherId]
       );
@@ -273,10 +296,10 @@ class Teacher {
         const userId = userResult.rows[0].user_id;
 
         // Delete teacher record (will cascade)
-        await client.query(`DELETE FROM teachers WHERE id = $1`, [teacherId]);
+        client.query(`DELETE FROM teachers WHERE id = $1`, [teacherId]);
 
         // Delete user record
-        await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+        client.query(`DELETE FROM users WHERE id = $1`, [userId]);
       }
     });
   }
