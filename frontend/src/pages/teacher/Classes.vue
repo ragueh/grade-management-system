@@ -163,7 +163,9 @@
                 required
                 class="input"
                 placeholder="e.g., 2024-2025"
+                pattern="\d{4}-\d{4}"
               />
+              <p class="text-xs text-gray-500 mt-1">Format: YYYY-YYYY (e.g., 2025-2026)</p>
             </div>
 
             <!-- Description -->
@@ -292,7 +294,12 @@ const saveClass = async () => {
     }
   } catch (err) {
     console.error('Save class error:', err)
-    error.value = err.response?.data?.message || 'Failed to save class'
+    const responseData = err.response?.data
+    if (responseData?.errors && responseData.errors.length > 0) {
+      error.value = responseData.errors.map(e => e.msg).join(', ')
+    } else {
+      error.value = responseData?.message || 'Failed to save class'
+    }
   } finally {
     formSubmitting.value = false
   }
