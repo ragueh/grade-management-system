@@ -4,8 +4,8 @@
   "description": "A comprehensive web-based grade management system",
   "scripts": {
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
-    "build": "cd frontend && npm run build",
-    "start": "cd backend && npm start",
+    "build": "npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend",
+    "start": "node backend/init-database.js && node backend/server.js",
     "dev": "cd backend && npm run dev",
     "init-db": "cd backend && node init-database.js"
   },
